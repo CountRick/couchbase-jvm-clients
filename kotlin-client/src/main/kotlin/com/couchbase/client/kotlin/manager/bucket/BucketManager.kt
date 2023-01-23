@@ -23,6 +23,10 @@ import com.couchbase.client.core.error.BucketNotFoundException
 import com.couchbase.client.core.json.Mapper
 import com.couchbase.client.core.manager.CoreBucketManager
 import com.couchbase.client.core.msg.kv.DurabilityLevel
+import com.couchbase.client.core.util.CbThrowables.hasCause
+import com.couchbase.client.core.util.CbThrowables.throwIfUnchecked
+import com.couchbase.client.kotlin.CommonCreateOptions
+import com.couchbase.client.kotlin.CommonDropOptions
 import com.couchbase.client.kotlin.CommonOptions
 import com.couchbase.client.kotlin.annotations.VolatileCouchbaseApi
 import com.couchbase.client.kotlin.kv.Durability
@@ -42,7 +46,7 @@ public class BucketManager(core: Core) {
      */
     public suspend fun createBucket(
         name: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonCreateOptions = CommonCreateOptions.Default,
         ramQuota: StorageSize = 100.mebibytes,
         bucketType: BucketType = BucketType.COUCHBASE,
         storageBackend: StorageBackend? = null, // null means default for bucket type
@@ -70,8 +74,14 @@ public class BucketManager(core: Core) {
             compressionMode = if (compressionMode == CompressionMode.PASSIVE) null else compressionMode,
             minimumDurability = if (minimumDurability !is Durability.Synchronous) null else minimumDurability,
         )
-
-        coreManager.createBucket(params.toMap(), common.toCore()).await()
+        try {
+            coreManager.createBucket(params.toMap(), options.toCore()).await()
+        } catch (e: Exception) {
+            if (!options.ignoreIfExists || !hasCause(e, BucketExistsException::class.java)) {
+                throwIfUnchecked(e)
+                throw RuntimeException(e)
+            }
+        }
     }
 
     /**
@@ -82,7 +92,7 @@ public class BucketManager(core: Core) {
      */
     public suspend fun updateBucket(
         name: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonOptions = CommonOptions.Default,
         ramQuota: StorageSize? = null,
         flushEnabled: Boolean? = null,
         replicas: Int? = null,
@@ -105,7 +115,7 @@ public class BucketManager(core: Core) {
             minimumDurability = minimumDurability,
             evictionPolicy = evictionPolicy,
         )
-        coreManager.updateBucket(params, common.toCore()).await()
+        coreManager.updateBucket(params, options.toCore()).await()
     }
 
     /**
@@ -115,9 +125,16 @@ public class BucketManager(core: Core) {
      */
     public suspend fun dropBucket(
         name: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonDropOptions = CommonDropOptions.Default,
     ) {
-        coreManager.dropBucket(name, common.toCore()).await()
+        try {
+            coreManager.dropBucket(name, options.toCore()).await()
+        } catch (e: Exception) {
+            if (!options.ignoreIfNotExists || !hasCause(e, BucketNotFoundException::class.java)) {
+                throwIfUnchecked(e)
+                throw RuntimeException(e)
+            }
+        }
     }
 
     /**
@@ -125,14 +142,14 @@ public class BucketManager(core: Core) {
      */
     public suspend fun getBucket(
         name: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonOptions = CommonOptions.Default,
     ): BucketSettings = BucketSettings.fromJson(
-        coreManager.getBucket(name, common.toCore()).await()
+        coreManager.getBucket(name, options.toCore()).await()
     )
 
     public suspend fun getAllBuckets(
-        common: CommonOptions = CommonOptions.Default,
-    ): List<BucketSettings> = coreManager.getAllBuckets(common.toCore()).await()
+        options: CommonOptions = CommonOptions.Default,
+    ): List<BucketSettings> = coreManager.getAllBuckets(options.toCore()).await()
         .values.toList().map { BucketSettings.fromJson(it) }
 
     /**
@@ -151,9 +168,9 @@ public class BucketManager(core: Core) {
      */
     public suspend fun flushBucket(
         bucketName: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonOptions = CommonOptions.Default,
     ) {
-        coreManager.flushBucket(bucketName, common.toCore()).await()
+        coreManager.flushBucket(bucketName, options.toCore()).await()
     }
 
     /**
@@ -164,9 +181,9 @@ public class BucketManager(core: Core) {
     @VolatileCouchbaseApi
     public suspend fun isHealthy(
         bucketName: String,
-        common: CommonOptions = CommonOptions.Default,
+        options: CommonOptions = CommonOptions.Default,
     ): Boolean {
-        val tree = Mapper.decodeIntoTree(coreManager.getBucket(bucketName, common.toCore()).await())
+        val tree = Mapper.decodeIntoTree(coreManager.getBucket(bucketName, options.toCore()).await())
         with(tree.path("nodes")) {
             return isArray && !isEmpty && all { it["status"].asText() == "healthy" }
         }

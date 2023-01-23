@@ -25,7 +25,7 @@ import kotlin.time.toJavaDuration
 /**
  * Options that apply most requests.
  */
-public class CommonOptions(
+public open class CommonOptions(
     public val timeout: Duration? = null,
     public val parentSpan: RequestSpan? = null,
     public val retryStrategy: RetryStrategy? = null,
